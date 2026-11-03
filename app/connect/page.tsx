@@ -90,12 +90,14 @@ export default function BleConnectPage() {
   const validate = () => {
     if (!selectedDevice) return "Hãy chọn thiết bị robot của bạn.";
     if (!ssid.trim()) return "Hãy nhập tên WiFi (SSID).";
+    if (new TextEncoder().encode(ssid.trim()).length > 32)
+      return "Tên WiFi không được vượt quá 32 byte.";
     if (password && password.length < 8)
       return "Mật khẩu WiFi phải có ít nhất 8 ký tự.";
     return null;
   };
 
-  // Kết nối + gửi WiFi trong một lần
+  // Kết nối BLE rồi provision WiFi qua giao thức WiFiProv của Espressif.
   const handleConnectAndSend = async (e: React.FormEvent) => {
     e.preventDefault();
     const err = validate();
@@ -121,20 +123,18 @@ export default function BleConnectPage() {
     );
 
     try {
-      // Bước 1: kết nối BLE
       await Promise.race([
         invoke("connect_robot_ble", { deviceId: selectedDevice }),
         timeoutPromise,
       ]);
       setConnected(true);
       setProgress(50);
-      setStatusMessage("Đã kết nối, đang gửi thông tin WiFi qua BluFi...");
+      setStatusMessage("Đã kết nối, đang gửi WiFi qua WiFiProv...");
 
-      // Bước 2: gửi WiFi
-      await invoke("send_wifi_credentials", { ssid, password });
+      await invoke("send_wifi_credentials", { ssid: ssid.trim(), password });
       setProgress(100);
       setStatusMessage(
-        `Đã gửi WiFi "${ssid}" tới robot. Robot sẽ tự kết nối WiFi.`,
+        `Đã gửi WiFi "${ssid.trim()}" tới robot. Sau khi kết nối mạng, robot sẽ kết nối tới ws://testudeo.local:8386/ws/stt.`,
       );
       setStatusType("success");
       setPassword("");
@@ -142,7 +142,6 @@ export default function BleConnectPage() {
       setStatusMessage(`Lỗi: ${error}`);
       setStatusType("failure");
       setProgress(0);
-      // Cố ngắt kết nối BLE nếu đã kết nối nhưng gửi WiFi thất bại
       if (connected) {
         try {
           await invoke("disconnect_robot_ble");
@@ -171,7 +170,6 @@ export default function BleConnectPage() {
 
   return (
     <div className="min-h-screen w-full from-slate-50 to-blue-50 flex flex-col items-center justify-center p-6">
-      {/* Header */}
       <div className="w-full max-w-2xl mb-6 text-center">
         <div className="flex items-center justify-center gap-2 mb-2">
           <HiOutlineWifi className="h-8 w-8 text-blue-600" />
@@ -181,22 +179,18 @@ export default function BleConnectPage() {
         </div>
       </div>
 
-      {/* Card chính */}
       <Card className="w-full max-w-2xl shadow-lg">
         <form onSubmit={handleConnectAndSend} className="flex flex-col gap-6">
-          {/* ===== Bước 1: Thiết bị BLE ===== */}
           <section className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
-              <Badge color="info" size="sm">
-                1
-              </Badge>
+              <Badge color="info" size="sm">1</Badge>
               <h2 className="text-lg font-semibold text-gray-800">
                 Chọn thiết bị là robot
               </h2>
             </div>
 
             <div>
-              <Label htmlFor="ble-device"> Thiết bị </Label>
+              <Label htmlFor="ble-device">Thiết bị</Label>
               <div className="flex gap-2 mt-1">
                 <Select
                   id="ble-device"
@@ -209,9 +203,7 @@ export default function BleConnectPage() {
                     <option value="">Không có thiết bị nào, hãy ấn quét</option>
                   ) : (
                     devices.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name ?? d.id}
-                      </option>
+                      <option key={d.id} value={d.id}>{d.name ?? d.id}</option>
                     ))
                   )}
                 </Select>
@@ -221,17 +213,7 @@ export default function BleConnectPage() {
                   onClick={handleScan}
                   disabled={isScanning || connected || isSending}
                 >
-                  {isScanning ? (
-                    <>
-                      <Spinner size="sm" className="mr-2" />
-                      Đang quét
-                    </>
-                  ) : (
-                    <>
-                      <HiOutlineRefresh className="mr-2 h-4 w-4" />
-                      Quét
-                    </>
-                  )}
+                  {isScanning ? <><Spinner size="sm" className="mr-2" />Đang quét</> : <><HiOutlineRefresh className="mr-2 h-4 w-4" />Quét</>}
                 </Button>
               </div>
             </div>
@@ -239,15 +221,10 @@ export default function BleConnectPage() {
 
           <HR />
 
-          {/* ===== Bước 2: WiFi ===== */}
           <section className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
-              <Badge color="info" size="sm">
-                2
-              </Badge>
-              <h2 className="text-lg font-semibold text-gray-800">
-                Thông tin WiFi
-              </h2>
+              <Badge color="info" size="sm">2</Badge>
+              <h2 className="text-lg font-semibold text-gray-800">Thông tin WiFi</h2>
             </div>
 
             <div>
@@ -272,11 +249,7 @@ export default function BleConnectPage() {
                   disabled={isSending}
                   className="absolute inset-y-0 left-0 flex items-center pl-3 z-10 text-gray-500 hover:text-gray-700 focus:outline-none"
                 >
-                  {showPassword ? (
-                    <HiOutlineEyeOff className="h-5 w-5" />
-                  ) : (
-                    <HiOutlineEye className="h-5 w-5" />
-                  )}
+                  {showPassword ? <HiOutlineEyeOff className="h-5 w-5" /> : <HiOutlineEye className="h-5 w-5" />}
                 </button>
                 <TextInput
                   id="wifi-password"
@@ -288,69 +261,31 @@ export default function BleConnectPage() {
                   className="[&_input]:pl-10"
                 />
               </div>
+              <HelperText>Prototype dùng WiFiProv Security 0; thông tin không được mã hóa ở tầng provisioning.</HelperText>
             </div>
           </section>
 
           <HR />
 
-          {/* ===== Nút hành động ===== */}
           <div className="flex gap-3">
-            <Button
-              type="submit"
-              className="flex-1"
-              disabled={isSending || isScanning}
-              color="blue"
-            >
-              {isSending ? (
-                <>
-                  <Spinner size="sm" className="mr-2" />
-                  Đang xử lý...
-                </>
-              ) : (
-                "Kết nối"
-              )}
+            <Button type="submit" className="flex-1" disabled={isSending || isScanning} color="blue">
+              {isSending ? <><Spinner size="sm" className="mr-2" />Đang xử lý...</> : "Kết nối"}
             </Button>
-
             {connected && (
-              <Button
-                type="button"
-                color="failure"
-                onClick={handleDisconnect}
-                disabled={isSending}
-              >
+              <Button type="button" color="failure" onClick={handleDisconnect} disabled={isSending}>
                 Ngắt kết nối
               </Button>
             )}
           </div>
 
-          {/* Thanh tiến trình */}
           {(isSending || progress > 0) && (
-            <div>
-              <Progress
-                progress={progress}
-                color={progress === 100 ? "green" : "blue"}
-                size="sm"
-              />
-            </div>
+            <Progress progress={progress} color={progress === 100 ? "green" : "blue"} size="sm" />
           )}
 
-          {/* Thông báo trạng thái */}
           {statusMessage && (
             <Alert
-              color={
-                statusType === "success"
-                  ? "success"
-                  : statusType === "failure"
-                    ? "failure"
-                    : "info"
-              }
-              icon={
-                statusType === "success"
-                  ? HiOutlineCheckCircle
-                  : statusType === "failure"
-                    ? HiOutlineExclamationCircle
-                    : undefined
-              }
+              color={statusType === "success" ? "success" : statusType === "failure" ? "failure" : "info"}
+              icon={statusType === "success" ? HiOutlineCheckCircle : statusType === "failure" ? HiOutlineExclamationCircle : undefined}
             >
               <span className="text-sm break-words">{statusMessage}</span>
             </Alert>
